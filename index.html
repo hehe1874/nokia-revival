@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nokia Revival — Kiroween 2026</title>
+<style>
+  body { background: #222; font-family: monospace; display: flex;
+    justify-content: center; padding: 24px; margin: 0; }
+  .phone { background: #3a4450; border-radius: 28px; padding: 18px;
+    width: 260px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .screen { background: #9bbc7a; border-radius: 6px; height: 300px;
+    padding: 10px; box-sizing: border-box; color: #1d2b12;
+    display: flex; flex-direction: column; }
+  .status { display: flex; justify-content: space-between;
+    font-size: 12px; border-bottom: 1px solid #1d2b12; padding-bottom: 4px; }
+  .menu { margin-top: 12px; font-size: 15px; line-height: 1.9; }
+  .menu .sel { background: #1d2b12; color: #9bbc7a; }
+  .game { display: none; flex-direction: column; align-items: center;
+    margin-top: 8px; }
+  .game.on { display: flex; }
+  .score { font-size: 13px; width: 200px; display: flex;
+    justify-content: space-between; }
+  canvas { background: #9bbc7a; border: 2px solid #1d2b12; margin-top: 4px; }
+  .gameover { font-size: 14px; font-weight: bold; margin-top: 6px;
+    min-height: 18px; text-align: center; }
+  .msgbody { font-size: 13px; line-height: 1.5; white-space: pre-wrap;
+    word-break: break-word; }
+  .compose { font-size: 14px; line-height: 1.6; word-break: break-word; }
+  .cursor { background: #1d2b12; color: #9bbc7a; }
+  .keys { display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 8px; margin-top: 14px; }
+  .keys button { height: 40px; border-radius: 8px; border: none;
+    background: #d7dde3; font: bold 15px monospace; cursor: pointer; }
+  .keys button:active { background: #aeb8c2; }
+  .dpad { display: grid; grid-template-columns: repeat(3, 52px);
+    justify-content: center; gap: 6px; margin-top: 12px; }
+  .dpad button { height: 30px; border-radius: 6px; border: none;
+    background: #57606b; color: #fff; cursor: pointer; }
+  .dpad button:active { background: #3a4450; }
+  .hint { color: #888; font-size: 11px; text-align: center; margin-top: 12px; }
+  /* --- Task 6 polish: key-press feel, screen swap, small screens --- */
+  .keys button, .dpad button { transition: transform .06s ease, background .06s ease; }
+  .keys button.pressed, .dpad button.pressed { transform: translateY(1px) scale(.95); }
+  .menu .sel { transition: background .12s ease, color .12s ease; }
+  .screen.swap { animation: screenIn .18s ease; }
+  @keyframes screenIn { from { opacity: .3; } to { opacity: 1; } }
+  @media (max-width: 480px) {
+    body { padding: 8px; }
+    .phone { width: min(300px, calc(100vw - 16px)); padding: 12px;
+      border-radius: 20px; box-sizing: border-box; }
+    .screen { height: 280px; }
+    .keys button { height: 44px; }
+    .hint { font-size: 10px; }
+  }
+  @media (max-height: 700px) {
+    body { padding: 8px; }
+    .keys { margin-top: 8px; gap: 6px; }
+    .dpad { margin-top: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="screen">
+    <div class="status"><span>&#9612;&#9612;&#9612;&#9612;</span><span id="clock"></span><span>&#9646; 100%</span></div>
+    <div class="menu" id="menu"></div>
+    <div class="game" id="game">
+      <div class="score"><span>SNAKE</span><span id="score">Score 0</span><span id="best">Best 0</span></div>
+      <canvas id="board" width="200" height="160"></canvas>
+      <div class="gameover" id="gameover"></div>
+    </div>
+  </div>
+  <div class="dpad">
+    <span></span><button onclick="dpad('up')">&uarr;</button><span></span>
+    <button onclick="dpad('left')">&larr;</button><button onclick="select()">OK</button><button onclick="dpad('right')">&rarr;</button>
+    <span></span><button onclick="dpad('down')">&darr;</button><span></span>
+  </div>
+  <div class="keys" id="keys"></div>
+  <div class="hint">Arrow keys = D-pad &middot; digits = keypad &middot; Enter = OK<br>
+  In Messages: digits = T9 (2=abc&hellip;), * = delete, OK = send, # = back. In Composer: 1–9 = notes, 0 = rest, * = delete, OK = play, # = back.</div>
+</div>
+<script>
+  // --- Menu shell ---
+  const items = ["Messages", "Snake", "Composer", "Settings"];
+  let sel = 0, view = "menu";
+  const menu = document.getElementById("menu");
+  const gameEl = document.getElementById("game");
+  function drawMenu() {
+    menu.innerHTML = items.map((it, i) =>
+      `<div class="${i === sel ? "sel" : ""}">${i === sel ? "&gt; " : "&nbsp;&nbsp;"}${it}</div>`).join("");
+    document.getElementById("clock").textContent =
+      new Date().toTimeString().slice(0, 5);
+  }
+  // Task 6 polish: brief fade each time the screen swaps views.
+  function swapScreen() {
+    try {
+      const s = document.querySelector(".screen");
+      s.classList.remove("swap"); void s.offsetWidth; s.classList.add("swap");
+      setTimeout(() => s.classList.remove("swap"), 200);
+    } catch (e) {}
+  }
+  function showMenu() { stopSnake(); view = "menu"; gameEl.classList.remove("on"); menu.style.display = ""; swapScreen(); drawMenu(); }
+  function goBack() {
+    if (view === "composer") { stopComposer(); showMenu(); return; }
+    if (view === "snake") { showMenu(); return; }
+    if (view === "compose") { t9pending = null; showMessages(); return; }
+    if (view === "msgread") {
+      if (msgReturn === "sent") { view = "sent"; msgSel = 0; drawMsg(); }
+      else showMessages();
+      return;
+    }
+    if (view === "sent") { showMessages(); return; }
+    if (view === "messages") { showMenu(); return; }
+  }
+  function select() {
+    if (view !== "composer") blip(1600); // composer already answers with the melody
+    flashKey("OK");
+    if (view === "composer") { playMelody(); return; }
+    if (view === "snake") { if (snakeOver) startSnake(); return; }
+    if (view === "messages" || view === "sent") { openMsg(msgSel); return; }
+    if (view === "msgread") { goBack(); return; }
+    if (view === "compose") { sendMsg(); return; }
+    if (items[sel] === "Snake") startSnake();
+    else if (items[sel] === "Composer") showComposer();
+    else if (items[sel] === "Messages") showMessages();
+    else alert(items[sel] + " — not built yet. Pick a task from .kiro/specs/nokia-phone/tasks.md.");
+  }
+  function dpad(dir) {
+    blip(1200);
+    flashKey({ up: "↑", down: "↓", left: "←", right: "→" }[dir] || "");
+    if (view === "composer") {
+      if (dir === "up") { tempo = Math.min(240, tempo + 20); drawComposer(); }
+      if (dir === "down") { tempo = Math.max(60, tempo - 20); drawComposer(); }
+      return;
+    }
+    if (view === "snake") { steer(dir); return; }
+    if (view === "messages" || view === "sent") {
+      const n = view === "sent" ? sentMsgs.length : inboxItems().length;
+      if (!n) return;
+      if (dir === "up") msgSel = (msgSel - 1 + n) % n;
+      if (dir === "down") msgSel = (msgSel + 1) % n;
+      drawMsg(); return;
+    }
+    if (dir === "up") sel = (sel - 1 + items.length) % items.length;
+    if (dir === "down") sel = (sel + 1) % items.length;
+    drawMenu();
+  }
+
+  // --- Messages + multi-tap T9 (task 3) ---
+  const T9 = { "2": "abc", "3": "def", "4": "ghi", "5": "jkl", "6": "mno",
+    "7": "pqrs", "8": "tuv", "9": "wxyz", "0": " ", "1": ".,?!" };
+  const inbox = [
+    { from: "Mum", text: "Call home when you are free!" },
+    { from: "Kiro", text: "Welcome to Kiroween. Your Nokia is back." }
+  ];
+  let sentMsgs = [];
+  let msgSel = 0, msgReturn = "messages", readMsg = null;
+  let composeText = "", t9pending = null;
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function inboxItems() {
+    const list = [{ label: "Write new", kind: "compose" },
+      { label: "Sent (" + sentMsgs.length + ")", kind: "sent" }];
+    inbox.forEach(m => list.push({ label: m.from + ": " + m.text.slice(0, 14) +
+      (m.text.length > 14 ? "…" : ""), kind: "read", msg: m }));
+    return list;
+  }
+  function showMessages() {
+    view = "messages"; msgSel = 0;
+    stopSnake(); gameEl.classList.remove("on"); swapScreen(); drawMsg();
+  }
+  function drawMsg() {
+    const el = document.getElementById("menu");
+    el.style.display = "";
+    if (view === "compose") {
+      const pend = t9pending ? T9[t9pending.key][t9pending.idx] : "";
+      el.innerHTML = '<div class="compose">To: ...<br>' + esc(composeText + pend) +
+        '<span class="cursor">_</span><br><br>OK=send #=back *=del</div>';
+      document.getElementById("clock").textContent =
+        new Date().toTimeString().slice(0, 5);
+      return;
+    }
+    if (view === "msgread" && readMsg) {
+      el.innerHTML = '<div class="msgbody">From: ' + esc(readMsg.from) + '<br><br>' +
+        esc(readMsg.text) + '<br><br>#=back</div>';
+      return;
+    }
+    if (view === "sent") {
+      const list = sentMsgs.map(m => ({ label: "Me: " + m.text.slice(0, 14) +
+        (m.text.length > 14 ? "…" : ""), kind: "read", msg: m }));
+      el.innerHTML = "<div>Sent</div>" + (list.length ? list.map((it, i) =>
+        `<div class="${i === msgSel ? "sel" : ""}">${i === msgSel ? "&gt; " : "&nbsp;&nbsp;"}${esc(it.label)}</div>`).join("") : "<div>(empty)</div>");
+      return;
+    }
+    const list = inboxItems();
+    el.innerHTML = "<div>Messages</div>" + list.map((it, i) =>
+      `<div class="${i === msgSel ? "sel" : ""}">${i === msgSel ? "&gt; " : "&nbsp;&nbsp;"}${esc(it.label)}</div>`).join("");
+  }
+  function openMsg(i) {
+    const list = view === "sent"
+      ? sentMsgs.map(m => ({ kind: "read", msg: m }))
+      : inboxItems();
+    const it = list[i]; if (!it) return;
+    if (it.kind === "compose") { view = "compose"; composeText = ""; t9pending = null; drawMsg(); return; }
+    if (it.kind === "sent") { view = "sent"; msgSel = 0; drawMsg(); return; }
+    msgReturn = view; readMsg = it.msg; view = "msgread"; drawMsg();
+  }
+  function t9Commit() {
+    if (!t9pending) return;
+    composeText += T9[t9pending.key][t9pending.idx];
+    t9pending = null;
+  }
+  function t9Press(d, now) {
+    now = now === undefined ? Date.now() : now;
+    if (t9pending && (d !== t9pending.key || now - t9pending.at > 900)) t9Commit();
+    if (t9pending && d === t9pending.key) {
+      t9pending.idx = (t9pending.idx + 1) % T9[d].length;
+      t9pending.at = now;
+    } else if (T9[d]) {
+      t9pending = { key: d, idx: 0, at: now };
+    }
+    drawMsg();
+  }
+  function t9Backspace() {
+    if (t9pending) { t9pending = null; }
+    else composeText = composeText.slice(0, -1);
+    drawMsg();
+  }
+  function sendMsg() {
+    t9Commit();
+    if (composeText.trim()) sentMsgs.push({ from: "Me", text: composeText });
+    showMessages();
+  }
+
+  // --- Ringtone composer (task 5): keypad notes + WebAudio + save/load ---
+  // 1=C4 2=D4 3=E4 4=F4 5=G4 6=A4 7=B4 8=C5 9=D5, 0=rest.
+  const NOTES = { "1": ["C4", 261.63], "2": ["D4", 293.66], "3": ["E4", 329.63],
+    "4": ["F4", 349.23], "5": ["G4", 392.00], "6": ["A4", 440.00],
+    "7": ["B4", 493.88], "8": ["C5", 523.25], "9": ["D5", 587.33], "0": ["–", 0] };
+  let melody = [], tempo = 120, audioCtx = null, playTimer = null;
+  function loadMelody() {
+    try {
+      const raw = window.localStorage && localStorage.getItem("nokia-melody");
+      if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) melody = arr.filter(k => NOTES[k]); }
+    } catch (e) { /* private mode / file://: keep in-memory only */ }
+  }
+  function saveMelody() {
+    try { if (window.localStorage) localStorage.setItem("nokia-melody", JSON.stringify(melody)); } catch (e) {}
+  }
+  function showComposer() {
+    view = "composer"; stopSnake(); gameEl.classList.remove("on");
+    loadMelody(); swapScreen(); drawComposer();
+  }
+  function drawComposer() {
+    const el = document.getElementById("menu");
+    el.style.display = "";
+    const notes = melody.length ? melody.map(k => NOTES[k][0]).join(" ") : "(empty — tap 1–9)";
+    const saved = melody.length ? "<br>Saved ✓" : "";
+    el.innerHTML = '<div class="compose">Composer ♪ ' + tempo + ' BPM<br><br>' +
+      esc(notes) + '<span class="cursor">_</span><br><br>' +
+      '1–9 notes · 0 rest<br>OK=play · *=del · #=back<br>↑↓ tempo' + saved + '</div>';
+    document.getElementById("clock").textContent =
+      new Date().toTimeString().slice(0, 5);
+  }
+  function getAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      return audioCtx;
+    } catch (e) { return null; }
+  }
+  function playNote(freq, when, dur) {
+    const ac = getAudio(); if (!ac || !freq) return;
+    try {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "square"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.12, when);
+      g.gain.exponentialRampToValueAtTime(0.001, when + dur);
+      o.connect(g); g.connect(ac.destination);
+      o.start(when); o.stop(when + dur + 0.02);
+    } catch (e) {}
+  }
+  function composerPress(ch) {
+    if (ch >= "0" && ch <= "9") {
+      if (melody.length < 32) {
+        melody.push(ch); saveMelody();
+        const f = NOTES[ch][1];
+        if (f) { const ac = getAudio(); if (ac) playNote(f, ac.currentTime, 60 / tempo * 0.9); }
+      }
+      drawComposer();
+    } else if (ch === "*") { melody.pop(); saveMelody(); drawComposer(); }
+  }
+  function playMelody() {
+    if (!melody.length) return;
+    const ac = getAudio(); if (!ac) return;
+    stopComposer();
+    const beat = 60 / tempo;
+    melody.forEach((k, i) => {
+      const f = NOTES[k][1];
+      if (f) playNote(f, ac.currentTime + i * beat, beat * 0.9);
+    });
+    playTimer = setTimeout(() => { playTimer = null; }, melody.length * beat * 1000);
+  }
+  function stopComposer() { if (playTimer) { clearTimeout(playTimer); playTimer = null; } }
+
+  // --- Task 6 polish: key-press click + button press flash ---
+  // Short quiet square-wave click; composer digits skip it — the note
+  // itself is the feedback there. Everything is guarded: no audio
+  // support must never break a key press.
+  function blip(freq) {
+    try {
+      const ac = getAudio(); if (!ac) return;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "square"; o.frequency.value = freq || 1400;
+      g.gain.setValueAtTime(0.04, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.04);
+      o.connect(g); g.connect(ac.destination);
+      o.start(ac.currentTime); o.stop(ac.currentTime + 0.05);
+    } catch (e) {}
+  }
+  function flashKey(label) {
+    if (!label) return;
+    try {
+      const btns = document.querySelectorAll(".keys button, .dpad button");
+      for (const b of btns) {
+        if (b.textContent.trim().startsWith(label)) {
+          b.classList.add("pressed");
+          setTimeout(() => b.classList.remove("pressed"), 90);
+          break;
+        }
+      }
+    } catch (e) {}
+  }
+
+  // --- Snake (task 4): 20x16 grid, D-pad / arrow keys, score + best ---
+  const COLS = 20, ROWS = 16, CELL = 10;
+  const ctx = document.getElementById("board").getContext("2d");
+  const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  let snake, dir, queuedDir, food, score, best = 0, snakeOver = false, timer = null;
+  function placeFood() {
+    while (true) {
+      const f = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+      if (!snake.some(s => s.x === f.x && s.y === f.y)) return f;
+    }
+  }
+  function drawSnake() {
+    ctx.fillStyle = "#9bbc7a"; ctx.fillRect(0, 0, 200, 160);
+    ctx.fillStyle = "#1d2b12";
+    // Task 6 polish: food blinks (~300 ms) so the target is easy to spot.
+    if (Math.floor(Date.now() / 300) % 2 === 0)
+      ctx.fillRect(food.x * CELL + 1, food.y * CELL + 1, CELL - 2, CELL - 2);
+    snake.forEach((s, i) => {
+      if (i === 0) ctx.fillRect(s.x * CELL, s.y * CELL, CELL, CELL);
+      else ctx.fillRect(s.x * CELL + 1, s.y * CELL + 1, CELL - 2, CELL - 2);
+    });
+    document.getElementById("score").textContent = "Score " + score;
+    document.getElementById("best").textContent = "Best " + best;
+  }
+  function step() {
+    dir = queuedDir;
+    const head = { x: snake[0].x + dir[0], y: snake[0].y + dir[1] };
+    const hitWall = head.x < 0 || head.y < 0 || head.x >= COLS || head.y >= ROWS;
+    const hitSelf = snake.some(s => s.x === head.x && s.y === head.y);
+    if (hitWall || hitSelf) {
+      snakeOver = true; clearInterval(timer); timer = null;
+      document.getElementById("gameover").textContent = "GAME OVER — OK to retry, # for menu";
+      return;
+    }
+    snake.unshift(head);
+    if (head.x === food.x && head.y === food.y) {
+      score += 10; best = Math.max(best, score);
+      food = placeFood();
+      if (timer) { clearInterval(timer); timer = setInterval(step, Math.max(70, 150 - score)); }
+    } else snake.pop();
+    drawSnake();
+  }
+  function startSnake() {
+    view = "snake"; snakeOver = false;
+    menu.style.display = "none"; gameEl.classList.add("on"); swapScreen();
+    document.getElementById("gameover").textContent = "";
+    snake = [{ x: 10, y: 8 }, { x: 9, y: 8 }, { x: 8, y: 8 }];
+    dir = queuedDir = [1, 0]; score = 0; food = placeFood();
+    drawSnake();
+    if (timer) clearInterval(timer);
+    timer = setInterval(step, 150);
+  }
+  function stopSnake() { if (timer) { clearInterval(timer); timer = null; } }
+  function steer(d) {
+    if (snakeOver) return;
+    const nd = DIRS[d];
+    if (nd[0] === -dir[0] && nd[1] === -dir[1]) return; // no instant U-turn
+    queuedDir = nd;
+  }
+
+  // --- Keypad + keyboard ---
+  function keyPress(ch) {
+    // Task 6 polish: click + press flash on every key. Composer digits
+    // skip the click — the note itself is the feedback.
+    if (!(view === "composer" && ch >= "0" && ch <= "9")) blip();
+    flashKey(ch);
+    if (view === "composer") {
+      if (ch >= "0" && ch <= "9") { composerPress(ch); return; }
+      if (ch === "*") { composerPress(ch); return; }
+      if (ch === "#") { goBack(); return; }
+      return;
+    }
+    if (view === "compose") {
+      if (ch >= "0" && ch <= "9") { t9Press(ch); return; }
+      if (ch === "*") { t9Backspace(); return; }
+      if (ch === "#") { t9pending = null; showMessages(); return; }
+      return;
+    }
+    if (ch === "#") { goBack(); return; }
+  }
+  const keys = document.getElementById("keys");
+  ["1","2 abc","3 def","4 ghi","5 jkl","6 mno","7 pqrs","8 tuv","9 wxyz","*","0 +","#"].forEach(k => {
+    const b = document.createElement("button");
+    b.textContent = k;
+    b.onclick = () => keyPress(k[0]);
+    keys.appendChild(b);
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowUp") { e.preventDefault(); dpad("up"); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); dpad("down"); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); dpad("left"); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); dpad("right"); }
+    else if (e.key === "Enter") select();
+    else if (e.key === "Escape" || e.key === "#") { goBack(); }
+    else if ((e.key >= "0" && e.key <= "9") || e.key === "*") { keyPress(e.key); }
+  });
+  drawMenu(); setInterval(() => { if (view === "menu") drawMenu(); }, 20000);
+</script>
+</body>
+</html>
